@@ -7,30 +7,6 @@ import os
 import json
 import toml
 
-# --- DEBUG: Verifica o conteúdo de st.secrets ---
-st.write("--- DEBUG INFO ---")
-st.write(f"Caminho atual do script: {Path(__file__).parent}")
-if Path(__file__).parent.joinpath(".streamlit/secrets.toml").exists():
-    st.write(".streamlit/secrets.toml EXISTE!")
-    try:
-        with open(Path(__file__).parent.joinpath(".streamlit/secrets.toml"), "r") as f:
-            debug_secrets = toml.load(f)
-            st.write(f"Conteúdo de secrets.toml lido diretamente (apenas chaves): {debug_secrets.keys()}")
-            if "GEMINI_API_KEY" in debug_secrets:
-                st.write("GEMINI_API_KEY ENCONTRADA no secrets.toml lido diretamente.")
-            else:
-                st.write("GEMINI_API_KEY NÃO ENCONTRADA no secrets.toml lido diretamente.")
-    except Exception as e:
-        st.write(f"Erro ao ler secrets.toml diretamente para debug: {e}")
-else:
-    st.write(".streamlit/secrets.toml NÃO EXISTE ou caminho incorreto!")
-
-if "GEMINI_API_KEY" in st.secrets:
-    st.write("st.secrets RECONHECE GEMINI_API_KEY!")
-else:
-    st.write("st.secrets NÃO RECONHECE GEMINI_API_KEY!")
-st.write("--- FIM DEBUG INFO ---")
-
 # --- Configuração da API Gemini ---
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])

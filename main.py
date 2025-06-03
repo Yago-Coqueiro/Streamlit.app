@@ -84,41 +84,30 @@ def verify_game_with_ai(game_name: str) -> bool:
         st.error(f"Erro ao verificar o jogo com a IA: {e}")
         return False
 
-# --- Obter Métodos de Download e Sugerir Executável com IA ---
-def get_game_download_info_with_ai(game_name: str):
-    prompt = f"""Para o jogo '{game_name}', liste os 3 (três) métodos de download/plataformas de PC mais frequentes onde os usuários geralmente o adquirem e jogam. Se o jogo for primariamente de console, mencione a principal loja digital do console.
-    Para cada método, também tente inferir um nome de arquivo executável comum (ex: 'game.exe', 'launcher.exe').
-    Formate sua resposta estritamente como uma lista JSON, no seguinte formato:
-    {{
-        "frequent_methods": [
-            {{"platform": "Nome da Plataforma 1", "exe_suggestion": "nome_exe_1.exe"}},
-            {{"platform": "Nome da Plataforma 2", "exe_suggestion": "nome_exe_2.exe"}},
-            {{"platform": "Nome da Plataforma 3", "exe_suggestion": "nome_exe_3.exe"}}
-        ],
-        "other_platforms_hint": "Outras plataformas conhecidas para este jogo."
-    }}
-    Se não houver informações claras para o executável, use "Não disponível".
+# --- Obter Sugestão de Executável com IA (simplificado) ---
+def get_game_exe_suggestion_with_ai(game_name: str):
+    prompt = f"""Para o jogo '{game_name}', qual é o nome de arquivo executável mais comum (ex: 'game.exe', 'launcher.exe')?
+    Responda APENAS o nome do arquivo executável, sem formatação extra, aspas ou explicações.
+    Se não houver um executável óbvio ou for um jogo de console, responda "N/A".
     """
     try:
         response = model.generate_content(prompt)
         if response and response.text:
-            json_string = response.text.strip()
-            if json_string.startswith("```json") and json_string.endswith("```"):
-                json_string = json_string[7:-3].strip()
-            data = json.loads(json_string)
-            return data
-        return None
+            cleaned_response = response.text.strip().replace('"', '')
+            if cleaned_response.lower() == "não disponível":
+                return "N/A"
+            return cleaned_response
+        return "N/A"
     except Exception as e:
-        st.error(f"Erro ao obter informações de download do jogo com a IA: {e}. Resposta da IA: {response.text if response else 'N/A'}")
-        return None
+        st.error(f"Erro ao obter sugestão de executável com a IA: {e}. Resposta da IA: {response.text if response else 'N/A'}")
+        return "N/A"
 
 # --- Gerar Prompt de Análise de Gameplay com IA ---
-def generate_gameplay_analysis_prompt(game_name: str, download_platform: str) -> str:
+def generate_gameplay_analysis_prompt(game_name: str) -> str:
     try:
         ai_prompt_generator_instruction = f"""
         Você é um especialista em jogos. Sua tarefa é criar um prompt de instrução para uma IA analisar um frame de gameplay de um usuário.
         O prompt deve ser detalhado, focar em feedback técnico e específico para o jogo '{game_name}'.
-        Considere que o usuário baixou o jogo via '{download_platform}'. Isso pode influenciar sutilmente (ex: mencionar aspectos de interface ou recursos específicos da plataforma, se houver, mas sem focar nisso).
         Inclua os seguintes pontos no prompt gerado:
         - Papel da IA (ex: "Você é um especialista em [Nome do Jogo]").
         - Tarefa da IA (ex: "Analise este frame de gameplay e forneça feedback técnico e específico.").
@@ -144,8 +133,6 @@ def generate_gameplay_analysis_prompt(game_name: str, download_platform: str) ->
         return ""
 
 # --- Importa a função de análise de gameplay ---
-# Certifique-se de que 'gameplay_analyzer.py' está no mesmo diretório
-# Se não estiver, você precisará ajustar o path ou a forma de importação.
 from gameplay_analyzer import run_gameplay_analysis
 
 # --- Lógica de sessão e telas ---
@@ -161,23 +148,21 @@ def main():
             st.session_state.game_selected = False
         if 'current_game' not in st.session_state:
             st.session_state.current_game = ""
-        if 'download_method_selected' not in st.session_state:
-            st.session_state.download_method_selected = False
-        if 'selected_platform' not in st.session_state:
-            st.session_state.selected_platform = ""
-        if 'suggested_exe' not in st.session_state:
-            st.session_state.suggested_exe = ""
+        # Remove download_method_selected, selected_platform.
+        # Agora vamos direto para 'exe_input_received'
+        if 'exe_input_received' not in st.session_state:
+            st.session_state.exe_input_received = False
+        if 'game_exe_name' not in st.session_state: # Novo estado para o nome do executável
+            st.session_state.game_exe_name = ""
         if 'gameplay_analysis_prompt' not in st.session_state:
             st.session_state.gameplay_analysis_prompt = ""
-        if 'analysis_report' not in st.session_state: # Armazenar o relatório final
+        if 'analysis_report' not in st.session_state:
             st.session_state.analysis_report = ""
-        
-        # Se login foi bem-sucedido, rerun limpo
+            
         if st.session_state.get("login_success"):
             st.session_state.pop("login_success")
-            st.rerun() # <-- MUDAR AQUI
-        
-        # Adicionando um estado para controlar se a análise foi iniciada
+            st.rerun()
+            
         if 'analysis_started' not in st.session_state:
             st.session_state.analysis_started = False
 
@@ -185,13 +170,13 @@ def main():
             show_auth_screen()
         elif not st.session_state.game_selected:
             show_game_selection()
-        elif not st.session_state.download_method_selected:
-            show_download_method_selection()
-        elif not st.session_state.analysis_started: # Nova tela para iniciar a análise
+        # Nova condição para pedir o executável
+        elif not st.session_state.exe_input_received:
+            show_exe_input_screen()
+        elif not st.session_state.analysis_started:
             show_start_analysis_screen()
         else:
-            show_analysis_results_screen() # Nova tela para exibir resultados
-
+            show_analysis_results_screen()
 
     except Exception as e:
         st.error(f"Ocorreu um erro inesperado: {e}. Por favor, recarregue a página.")
@@ -199,7 +184,7 @@ def main():
 def show_auth_screen():
     st.title("CONHEÇA O ME ENSINA A.I")
     st.write("""
-    Em meio ao crescimento acelerado do universo gamer a nível mundial, um site brasileiro vem se destacando ao unir inteligência artificial e paixão por jogos. A plataforma foi criada com um propósito claro: ajudar jogadores de todos os níveis a melhorarem suas habilidades por meio de análises inteligentes e treinos personalizados com apoio de IA.
+    Em meio ao crescimento acelerado do universo gamer, um site brasileiro vem se destacando ao unir inteligência artificial e paixão por jogos. A plataforma foi criada com um propósito claro: ajudar jogadores de todos os níveis a melhorarem suas habilidades por meio de análises inteligentes e treinos personalizados com apoio de IA.
     Com ferramentas que analisam o desempenho em tempo real, o site oferece feedbacks estratégicos, dicas de posicionamento, tempo de reação, mira e tomada de decisão. Tudo isso baseado em dados precisos, o que torna o treinamento muito mais eficiente do que os métodos tradicionais.
     Essa inovação não só eleva o nível dos jogadores casuais, mas também abre portas para que mais talentos brasileiros cheguem ao cenário competitivo. O resultado é uma nova geração de gamers cada vez mais preparada e profissionalizada, contribuindo diretamente para o crescimento do público e da relevância dos eSports no Brasil.
     Combinando tecnologia de ponta com acessibilidade, essa plataforma está transformando o jeito de jogar — e o futuro dos jogos no país.
@@ -259,6 +244,8 @@ def show_game_selection():
                     st.success(f"Jogo '{game_name}' encontrado!")
                     st.session_state.game_selected = True
                     st.session_state.current_game = game_name
+                    # Não precisamos mais do download_method_selected, vamos direto para a entrada do EXE
+                    st.session_state.exe_input_received = False # Reinicia para a próxima tela
                     st.rerun()
                 else:
                     st.warning(f"O jogo '{game_name}' não foi encontrado. Por favor, digite outro nome.")
@@ -267,114 +254,71 @@ def show_game_selection():
     except Exception as e:
         st.error(f"Erro ao processar o jogo: {e}. Tente novamente.")
 
-def show_download_method_selection():
-    st.title("Método de Download do Jogo")
+# --- Nova tela para solicitar o nome do executável ---
+def show_exe_input_screen():
+    st.title("Informe o Executável do Jogo")
     st.write(f"Você selecionou o jogo: **{st.session_state.current_game}**.")
-    st.write("Para te ajudar melhor, precisamos saber como você baixou este jogo.")
+    st.write("Para iniciar a análise, precisamos do nome do arquivo executável principal do jogo (ex: `valorant.exe`, `cs2.exe`, `fortniteclient-win64-shipping.exe`).")
 
-    if 'game_download_info' not in st.session_state:
-        with st.spinner("Consultando a IA para os métodos de download mais frequentes..."):
-            st.session_state.game_download_info = get_game_download_info_with_ai(st.session_state.current_game)
-
-    download_info = st.session_state.game_download_info
-
-    if download_info and download_info.get("frequent_methods"):
-        options = []
-        platform_to_exe_map = {}
-
-        for method in download_info["frequent_methods"]:
-            display_text = f"{method['platform']}"
-            if method.get('exe_suggestion') and method['exe_suggestion'] != "Não disponível":
-                 display_text += f" (Sugestão de EXE: {method['exe_suggestion']})"
-            options.append(display_text)
-            platform_to_exe_map[display_text] = {
-                "platform": method["platform"],
-                "exe_suggestion": method.get('exe_suggestion', 'Não disponível')
-            }
-
-        options.append("Outro (Método não listado acima)")
-        platform_to_exe_map["Outro (Método não listado acima)"] = {
-            "platform": "Outro",
-            "exe_suggestion": "Não disponível"
-        }
-
-        selected_option_display = st.radio(
-            "Qual foi o método que você usou para baixar o jogo?",
-            options
-        )
-
-        if st.button("Confirmar Método de Download"):
-            if selected_option_display:
-                selected_info = platform_to_exe_map[selected_option_display]
-                st.session_state.selected_platform = selected_info["platform"]
-                st.session_state.suggested_exe = selected_info["exe_suggestion"]
-
-                # Gera o prompt de análise de gameplay aqui
-                with st.spinner("Gerando prompt de análise de gameplay personalizado..."):
-                    generated_prompt = generate_gameplay_analysis_prompt(
-                        st.session_state.current_game,
-                        st.session_state.selected_platform
-                    )
-                    if generated_prompt:
-                        st.session_state.gameplay_analysis_prompt = generated_prompt
-                        st.success("Prompt de análise gerado com sucesso!")
-                    else:
-                        st.error("Não foi possível gerar um prompt de análise de gameplay. Tente novamente.")
-                        # Se o prompt falhar, talvez não avançar ou dar opção de continuar sem ele
-                        # Por enquanto, avançamos mesmo com erro para não travar o fluxo
-                
-                st.session_state.download_method_selected = True
-                st.rerun()
-            else:
-                st.warning("Por favor, selecione uma opção.")
+    suggested_exe = ""
+    if 'suggested_exe_from_ai' not in st.session_state:
+        with st.spinner(f"A IA está tentando sugerir um executável para '{st.session_state.current_game}'..."):
+            suggested_exe = get_game_exe_suggestion_with_ai(st.session_state.current_game)
+            st.session_state.suggested_exe_from_ai = suggested_exe
     else:
-        st.warning("Não foi possível obter informações sobre os métodos de download do jogo. Por favor, tente novamente mais tarde ou selecione 'Outro'.")
-        all_platforms_fallback = [
-            "Steam", "Epic Games Store", "Microsoft Store / Xbox App",
-            "PlayStation Store", "Nintendo eShop", "GOG (Good Old Games)",
-            "Battle.net (Blizzard)", "Ubisoft Connect", "EA App (antigo Origin)",
-            "Outro (Método não listado acima)"
-        ]
-        selected_option_fallback = st.radio(
-            "Qual foi o método que você usou para baixar o jogo?",
-            all_platforms_fallback
-        )
-        if st.button("Confirmar Método de Download"):
-            if selected_option_fallback:
-                st.session_state.selected_platform = selected_option_fallback
-                st.session_state.suggested_exe = "Não disponível"
-                # Gera o prompt de análise de gameplay aqui também para o fallback
-                with st.spinner("Gerando prompt de análise de gameplay personalizado..."):
-                    generated_prompt = generate_gameplay_analysis_prompt(
-                        st.session_state.current_game,
-                        st.session_state.selected_platform
-                    )
-                    if generated_prompt:
-                        st.session_state.gameplay_analysis_prompt = generated_prompt
-                        st.success("Prompt de análise gerado com sucesso!")
-                    else:
-                        st.error("Não foi possível gerar um prompt de análise de gameplay. Tente novamente.")
+        suggested_exe = st.session_state.suggested_exe_from_ai
 
-                st.session_state.download_method_selected = True
-                st.rerun()
-            else:
-                st.warning("Por favor, selecione uma opção.")
+    if suggested_exe and suggested_exe != "N/A":
+        st.info(f"Sugestão de executável para **{st.session_state.current_game}**: `{suggested_exe}`")
+        initial_value = suggested_exe
+    else:
+        st.warning("Não foi possível obter uma sugestão de executável para este jogo. Por favor, insira o nome manualmente.")
+        initial_value = ""
+
+    game_exe_name = st.text_input(
+        "Nome do arquivo executável (ex: `game.exe`)",
+        value=initial_value,
+        key="exe_input"
+    )
+
+    if st.button("Confirmar Executável e Gerar Análise"):
+        if game_exe_name.strip() and game_exe_name.lower() != "n/a":
+            st.session_state.game_exe_name = game_exe_name.strip()
+            
+            # Gera o prompt de análise de gameplay aqui
+            with st.spinner("Gerando prompt de análise de gameplay personalizado..."):
+                generated_prompt = generate_gameplay_analysis_prompt(st.session_state.current_game)
+                if generated_prompt:
+                    st.session_state.gameplay_analysis_prompt = generated_prompt
+                    st.success("Prompt de análise gerado com sucesso!")
+                else:
+                    st.error("Não foi possível gerar um prompt de análise de gameplay. Tente novamente.")
+                    # Se o prompt falhar, pode ser um problema, mas podemos tentar avançar.
+                    # Considere adicionar uma verificação mais robusta aqui.
+            
+            st.session_state.exe_input_received = True
+            st.session_state.analysis_started = False # Garante que a análise ainda não começou
+            st.rerun()
+        else:
+            st.warning("Por favor, digite um nome de arquivo executável válido.")
+
+    if st.button("Voltar para seleção de jogo"):
+        st.session_state.game_selected = False
+        st.session_state.exe_input_received = False
+        st.session_state.current_game = ""
+        st.session_state.suggested_exe_from_ai = "" # Limpa a sugestão anterior
+        st.rerun()
+
 
 # --- Nova tela para iniciar a análise ---
 def show_start_analysis_screen():
     st.title("Inicie sua Análise de Gameplay")
     st.write(f"Jogo selecionado: **{st.session_state.current_game}**")
-    st.write(f"Método de download: **{st.session_state.selected_platform}**")
-
-    if st.session_state.suggested_exe and st.session_state.suggested_exe != "Não disponível":
-        st.info(f"O arquivo executável que esperamos é: **{st.session_state.suggested_exe}**")
-        st.caption("Certifique-se de que este é o executável principal do jogo.")
-    else:
-        st.warning("Não foi possível sugerir um executável. Certifique-se de que o jogo está rodando em tela cheia (ou a área desejada está visível) e que você tem permissão para capturar a tela.")
+    st.write(f"Executável do jogo: **{st.session_state.game_exe_name}**")
 
     st.subheader("Instruções:")
     st.write("""
-    1.  **Abra o jogo** `""" + (st.session_state.suggested_exe if st.session_state.suggested_exe != "Não disponível" else "no seu método de download") + """` em **tela cheia** ou maximizado.
+    1.  **Abra o jogo** (`""" + st.session_state.game_exe_name + """`) em **tela cheia** ou maximizado.
     2.  Certifique-se de que o jogo está visível na sua tela principal.
     3.  Clique no botão "Iniciar Análise de Gameplay" abaixo.
     """)
@@ -386,25 +330,25 @@ def show_start_analysis_screen():
             st.caption("Este prompt será usado pela IA para analisar sua gameplay.")
 
     if st.button("Iniciar Análise de Gameplay", type="primary"):
-        if not st.session_state.suggested_exe or st.session_state.suggested_exe == "Não disponível":
-            st.error("Por favor, informe um executável válido ou certifique-se de que o jogo é de PC e será capturado corretamente.")
-            # Para testes, você pode comentar a linha acima e seguir mesmo sem EXE
-            # (Mas a função jogo_esta_rodando() vai falhar)
+        if not st.session_state.game_exe_name or st.session_state.game_exe_name == "N/A":
+            st.error("Por favor, informe um executável válido para iniciar a análise.")
+            return # Impede de prosseguir sem executável
 
         with st.spinner("Iniciando gravação e análise de gameplay... Por favor, jogue por alguns segundos."):
             # Chama a função principal de análise do gameplay_analyzer.py
-            # Passa o executável do jogo e o prompt gerado
             report = run_gameplay_analysis(
-                jogo_alvo=st.session_state.suggested_exe,
+                jogo_alvo=st.session_state.game_exe_name,
                 gameplay_prompt=st.session_state.gameplay_analysis_prompt,
-                game_name=st.session_state.current_game # <-- ADICIONE ESTA LINHA
+                game_name=st.session_state.current_game
             )
             st.session_state.analysis_report = report
             st.session_state.analysis_started = True # Marca que a análise foi concluída
             st.rerun()
-    
-    if st.button("Voltar para seleção de método"):
-        st.session_state.download_method_selected = False
+            
+    if st.button("Voltar para inserir outro executável"):
+        st.session_state.exe_input_received = False
+        st.session_state.game_exe_name = ""
+        st.session_state.suggested_exe_from_ai = ""
         st.rerun()
 
     if st.button("Sair"):
@@ -415,26 +359,26 @@ def show_start_analysis_screen():
 # --- Nova tela para exibir os resultados da análise ---
 def show_analysis_results_screen():
     st.title("Relatório de Análise de Gameplay")
-    st.markdown("---") # Linha divisória
+    st.markdown("---")
     
     st.subheader(f"Jogo: {st.session_state.current_game}")
-    st.write(f"Plataforma: {st.session_state.selected_platform}")
+    st.write(f"Executável analisado: {st.session_state.game_exe_name}")
     
     if st.session_state.analysis_report:
-        st.markdown(st.session_state.analysis_report) # Exibe o relatório em Markdown
+        st.markdown(st.session_state.analysis_report)
     else:
         st.warning("Nenhum relatório de análise disponível. Algo pode ter dado errado durante a gravação ou processamento.")
         st.info("Verifique os logs no terminal para mais detalhes.")
         
-    st.markdown("---") # Linha divisória
+    st.markdown("---")
     
     if st.button("Fazer nova análise para este jogo"):
-        st.session_state.analysis_started = False # Reinicia para capturar novamente
-        st.session_state.analysis_report = "" # Limpa o relatório anterior
+        st.session_state.analysis_started = False
+        st.session_state.analysis_report = ""
         st.rerun()
-    
+        
     if st.button("Escolher outro jogo"):
-        st.session_state.clear() # Limpa todos os estados para começar do zero
+        st.session_state.clear()
         st.rerun()
 
 

@@ -19,7 +19,6 @@ import google.generativeai as genai
 warnings.filterwarnings("ignore")
 
 # --- Variáveis Globais de Configuração (Padrões) ---
-# Elas serão sobrescritas pelos argumentos da função run_gameplay_analysis
 monitor_settings = {
     "top": 0,
     "left": 0,
@@ -29,25 +28,8 @@ monitor_settings = {
 fps = 10.0
 
 # As chaves de API devem ser carregadas de forma segura em ambiente de produção.
-# Para teste local, podem estar aqui, mas cuidado ao subir para repositórios públicos.
-# OPENROUTER_API_KEY e GEMINI_API_KEY serão passadas como st.secrets no fds.py,
-# mas se este script for executado standalone, elas precisariam ser definidas aqui ou via variáveis de ambiente.
-# Por simplicidade e para integração com Streamlit, o fds.py irá lidar com a passagem das chaves.
-# No entanto, a API Key do Gemini para `genai.GenerativeModel` PRECISA ser configurada.
-# O Ideal é configurar aqui APENAS a chave Gemini para o `genai.GenerativeModel`
-# que será usado para sintetizar as dicas, se ele for diferente do Gemini do fds.py.
-# Como o Gemini usado para síntese é o 'gemini-2.0-flash' e o do fds.py pode ser diferente,
-# configuramos aqui com a mesma chave, assumindo que ela é válida para ambos.
-#
-# Se você tiver um problema de cota com o 'gemini-2.0-flash' na síntese, ele pode
-# estar atingindo cotas separadas do 'gemini-1.5-flash-latest' que você usa no fds.py.
-# A melhor prática seria passar as chaves como argumentos da função.
-
-# --- APIs - Certifique-se que estas chaves são as suas chaves REAIS, NÃO as dummy ---
-# Nota: Para o Streamlit Cloud, o fds.py cuidará de passar as chaves de forma segura.
-# Aqui, mantemos as chaves para se este script for executado de forma independente.
 OPENROUTER_API_KEY = "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" # A chave do seu exemplo
-GEMINI_API_KEY = 'AIzaSyBco-5bq8-o_0adSTuktqf6c8-xui0hDcU' # A chave do seu exemplo
+GEMINI_API_KEY = 'AIzaSyBco-5bq8-o_0adSTuktqf6c6-xui0hDcU' # A chave do seu exemplo
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODEL = "meta-llama/llama-3.2-11b-vision-instruct:free"
@@ -57,15 +39,18 @@ genai.configure(api_key=GEMINI_API_KEY)
 
 
 def jogo_esta_rodando(jogo_alvo_exe: str) -> bool:
-    """Check if the target game is running."""
-    if not jogo_alvo_exe or jogo_alvo_exe == "Não disponível":
-        # Se não houver um executável alvo, não podemos verificar se está rodando
-        # Mas podemos assumir que o usuário vai rodar o jogo e capturar a tela.
-        # Para um sistema robusto, isso deveria ser um erro ou requerer confirmação manual.
-        return True # Assumimos que o jogo está rodando se não houver EXE alvo
+    """Check if the target game process is running."""
+    if not jogo_alvo_exe or jogo_alvo_exe.lower() == "n/a":
+        # Se não houver um executável alvo, assumimos que o usuário vai rodar o jogo
+        # e a captura de tela será feita. Isso pode levar a erros se o jogo não estiver aberto.
+        # Para um sistema robusto, isso deveria ser tratado com mais cuidado ou um aviso.
+        print("Aviso: Nenhum executável de jogo foi fornecido ou é 'N/A'. Prosseguindo com a captura de tela.")
+        return True # Assumimos que o jogo está rodando se não houver EXE alvo específico
     try:
-        output = os.popen('tasklist').read()
-        return jogo_alvo_exe.lower() in output.lower()
+        # Use 'tasklist /fi "IMAGENAME eq <jogo_alvo_exe>"' para uma verificação mais específica
+        # O subprocess.run é mais robusto que os.popen para esta finalidade.
+        result = subprocess.run(['tasklist', '/fi', f'IMAGENAME eq {jogo_alvo_exe}'], capture_output=True, text=True, check=False)
+        return jogo_alvo_exe.lower() in result.stdout.lower()
     except Exception as e:
         print(f"Erro ao verificar processo do jogo: {e}")
         return False
@@ -94,16 +79,14 @@ def capturar_tela(sct, monitor):
 def make_openrouter_request(url, headers, payload, timeout):
     """Make a request to OpenRouter with retry logic."""
     response = requests.post(url, headers=headers, json=payload, timeout=timeout)
-    # Adicionar log do status code e response text para depuração
     if response.status_code != 200:
         print(f"OpenRouter HTTP Error: {response.status_code} - {response.text}")
-    response.raise_for_status() # Lança exceção para status codes de erro
+    response.raise_for_status()
     return response
 
 def analyze_gameplay_with_llama(frames, gameplay_prompt: str, sample_size=5):
     """Analyze gameplay frames using Llama via OpenRouter."""
     tips = []
-    # Usando st.session_state.gameplay_analysis_prompt que foi passado
     if not gameplay_prompt:
         return ["Erro: Prompt de análise de gameplay não fornecido. A IA não pode analisar."]
 
@@ -115,14 +98,12 @@ def analyze_gameplay_with_llama(frames, gameplay_prompt: str, sample_size=5):
         "Content-Type": "application/json"
     }
 
-    # Select diverse frames (e.g., evenly spaced)
     total_frames = len(frames)
     step = max(1, total_frames // sample_size)
     selected_frames = [frames[i * step] for i in range(min(sample_size, total_frames // step))]
 
     for i, frame in enumerate(selected_frames):
         try:
-            # Convert frame to base64
             img_pil = Image.fromarray(frame)
             buffered = io.BytesIO()
             img_pil.save(buffered, format="JPEG", quality=85)
@@ -134,7 +115,7 @@ def analyze_gameplay_with_llama(frames, gameplay_prompt: str, sample_size=5):
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": gameplay_prompt}, # USA O PROMPT GERADO AQUI!
+                            {"type": "text", "text": gameplay_prompt},
                             {"type": "image_url", "image_url": f"data:image/jpeg;base64,{base64_image}"}
                         ]
                     }
@@ -145,7 +126,6 @@ def analyze_gameplay_with_llama(frames, gameplay_prompt: str, sample_size=5):
             response = make_openrouter_request(OPENROUTER_API_URL, headers, payload, timeout=30)
             data = response.json()
             
-            # Verifique se 'choices' e 'message' existem na resposta
             if 'choices' in data and len(data['choices']) > 0 and 'message' in data['choices'][0]:
                 tip = data['choices'][0]['message']['content']
                 tips.append(f"Frame {i+1}: {tip}")
@@ -168,9 +148,7 @@ def analyze_gameplay_with_llama(frames, gameplay_prompt: str, sample_size=5):
 def synthesize_tips_with_gemini(raw_tips, game_name: str):
     """Synthesize raw tips into a polished report using Gemini."""
     try:
-        # Nota: O modelo Gemini para síntese pode ser diferente do que você usa no fds.py.
-        # 'gemini-2.0-flash' é um bom modelo para essa tarefa.
-        model_synth = genai.GenerativeModel('models/gemini-2.0-flash') # Verifique se este modelo está disponível para sua chave!
+        model_synth = genai.GenerativeModel('models/gemini-2.0-flash')
         
         prompt = (
             f"Você é um assistente de jogos especializado em {game_name}. Recebi as seguintes análises de gameplay de um modelo de visão: \n\n"
@@ -198,135 +176,75 @@ def run_gameplay_analysis(jogo_alvo: str, gameplay_prompt: str, game_name: str, 
     Returns:
         str: O relatório final de análise da gameplay.
     """
-    st.write(f"Iniciando gravação de gameplay para {game_name} ({jogo_alvo}). Por favor, jogue por {duration_seconds} segundos...")
+    st.write(f"Iniciando gravação de gameplay para {game_name} (executável: {jogo_alvo}). Por favor, jogue por {duration_seconds} segundos...")
     st.write("A gravação será encerrada automaticamente.")
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    output_file = f"video_original_{timestamp}.avi"
-    compressed_file = f"video_comprimido_{timestamp}.mp4"
-    ml_data_file = f"dados_ml_{timestamp}.npy"
-    tips_file = f"gameplay_tips_{timestamp}.md" # Não é mais usado para salvar, só para nomeclatura interna
+    # Remover salvamento de vídeo local para evitar problemas de permissão/espaço no Streamlit Cloud
+    # output_file = f"video_original_{timestamp}.avi"
+    # compressed_file = f"video_comprimido_{timestamp}.mp4"
+    # ml_data_file = f"dados_ml_{timestamp}.npy" # Não será usado para salvar, apenas para conceito
 
-    # --- 1. Gravação do Vídeo ---
-    fourcc = cv2.VideoWriter_fourcc(*"XVID")
-    video_writer = cv2.VideoWriter(
-        output_file,
-        fourcc,
-        fps,
-        (monitor_settings["width"], monitor_settings["height"]),
-        isColor=False
-    )
-
+    # --- 1. Gravação dos Frames na Memória ---
+    sct = mss()
     frames_brutos = []
-    end_time = time.time() + duration_seconds
+    start_time = time.time()
+    last_capture_time = time.time()
+    frame_count = 0
 
-    with mss() as sct:
-        try:
-            while time.time() < end_time:
-                # Verificar se o jogo está rodando ANTES de tentar capturar
-                if not jogo_esta_rodando(jogo_alvo):
-                    # Se o jogo não está rodando, espera um pouco ou avisa
-                    st.warning(f"O jogo '{jogo_alvo}' não está em execução. Por favor, inicie o jogo para que a gravação possa começar. Tentando novamente em 5 segundos...")
-                    time.sleep(5)
-                    continue # Volta para o loop para verificar novamente
+    st.info("Verificando se o jogo está rodando...")
+    if not jogo_esta_rodando(jogo_alvo):
+        if jogo_alvo.lower() != "n/a": # Se um executável foi fornecido e não é "N/A"
+            st.error(f"Erro: O executável '{jogo_alvo}' não foi detectado. Por favor, certifique-se de que o jogo está aberto e rodando.")
+            return "Erro: O jogo não foi detectado rodando. Por favor, inicie o jogo antes de iniciar a análise."
+        else:
+            st.warning("Aviso: Nenhum executável específico foi fornecido, mas tentaremos capturar a tela. Certifique-se de que seu jogo está em tela cheia.")
 
+    st.success("Jogo detectado (ou prosseguindo sem verificação de executável). Iniciando captura de tela...")
+    progress_text = "Gravando gameplay... Aguarde."
+    my_bar = st.progress(0, text=progress_text)
+
+    try:
+        while True:
+            current_time = time.time()
+            if current_time - start_time > duration_seconds:
+                break
+
+            if current_time - last_capture_time >= (1.0 / fps):
                 frame = capturar_tela(sct, monitor_settings)
                 if frame is not None:
-                    try:
-                        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
-                        video_writer.write(gray_frame)
-                        frames_brutos.append(gray_frame)
-                    except Exception as e:
-                        print(f"❌ Erro no processamento do frame: {str(e)}")
-                        #st.error(f"Erro no processamento do frame: {str(e)}")
-                        continue
-                time.sleep(1/fps) # Controla o FPS
-            print("\nGravação encerrada.")
-        except Exception as e:
-            print(f"❌ Erro durante a gravação: {str(e)}")
-            return f"Erro durante a gravação: {str(e)}"
-        finally:
-            video_writer.release()
-            cv2.destroyAllWindows()
+                    frames_brutos.append(frame)
+                    frame_count += 1
+                last_capture_time = current_time
+            
+            # Atualiza a barra de progresso
+            progress_percent = min(100, int(((current_time - start_time) / duration_seconds) * 100))
+            my_bar.progress(progress_percent, text=f"Gravando gameplay... {progress_percent}% concluído.")
+            time.sleep(0.01) # Pequeno atraso para evitar consumo excessivo de CPU
 
-    # --- 2. Verificação dos Dados ---
-    if not frames_brutos:
-        print("❌ Nenhum frame válido foi capturado. Abortando análise.")
-        return "❌ Nenhum frame válido foi capturado. Verifique se o jogo estava aberto e visível durante a gravação."
+        my_bar.progress(100, text="Gravação concluída! Processando frames...")
+        st.success(f"Capturados {len(frames_brutos)} frames em {duration_seconds} segundos.")
 
-    # --- 3. Compressão do Vídeo (Opcional, pode ser removido se não for usar o arquivo) ---
-    # Manter para o caso de você querer salvar o vídeo comprimido
-    if os.path.exists(output_file):
-        try:
-            # st.info(f"Comprimindo vídeo para {compressed_file}...")
-            subprocess.run([
-                "ffmpeg",
-                "-i", output_file,
-                "-crf", "28",
-                "-preset", "ultrafast",
-                compressed_file
-            ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE) # Captura saída para evitar poluir terminal
-            print(f"✅ Vídeo comprimido: {compressed_file}")
-            # st.success("Vídeo comprimido com sucesso!")
-        except FileNotFoundError:
-            print("❌ FFmpeg não encontrado. Certifique-se de que está instalado e no PATH.")
-            # st.error("FFmpeg não encontrado. Não foi possível comprimir o vídeo.")
-        except subprocess.CalledProcessError as e:
-            print(f"❌ Erro na compressão (FFmpeg): {e.stderr.decode()}")
-            # st.error(f"Erro na compressão do vídeo: {e.stderr.decode()}")
-        except Exception as e:
-            print(f"❌ Falha na compressão geral: {str(e)}")
-            # st.error(f"Falha na compressão do vídeo: {str(e)}")
-    # Remova o arquivo original grande após a compressão
-    if os.path.exists(output_file):
-        os.remove(output_file)
+        if not frames_brutos:
+            return "Erro: Não foi possível capturar frames. Certifique-se de que a tela principal está visível e não há sobreposições."
 
-    # --- 4. Pré-Processamento para ML (Opcional, se você for usar os dados em outro lugar) ---
-    try:
-        frames_ml = np.array([cv2.resize(f, (64, 64))/255.0 for f in frames_brutos])
-        np.save(ml_data_file, frames_ml)
-        print(f"✅ Dados para ML salvos em: {ml_data_file}")
+        # --- 2. Análise dos Frames com Llama ---
+        st.info("Enviando frames para análise da IA (Llama)... Isso pode levar alguns minutos.")
+        raw_tips = analyze_gameplay_with_llama(frames_brutos, gameplay_prompt)
+        
+        if not raw_tips or "Erro" in raw_tips[0]:
+            return f"Erro na análise de gameplay com Llama: {raw_tips[0] if raw_tips else 'Nenhum feedback da IA.'}"
+
+        st.success("Análise dos frames concluída. Sintetizando dicas...")
+        
+        # --- 3. Síntese das Dicas com Gemini ---
+        final_report = synthesize_tips_with_gemini(raw_tips, game_name)
+
+        return final_report
+
     except Exception as e:
-        print(f"❌ Falha no pré-processamento de dados para ML: {str(e)}")
-        # st.error(f"Falha no pré-processamento de dados para ML: {str(e)}")
-
-    # --- 5. Análise de Gameplay ---
-    print("Iniciando análise de gameplay com Llama (OpenRouter)...")
-    # st.info("Analisando frames com a IA (isso pode levar alguns minutos)...")
-    raw_tips = analyze_gameplay_with_llama(frames_brutos, gameplay_prompt, sample_size=5)
-    
-    if not raw_tips or raw_tips[0].startswith("Erro"):
-        print(f"❌ Erro na análise com Llama: {raw_tips[0] if raw_tips else 'N/A'}")
-        return f"❌ Erro na análise com Llama. Por favor, tente novamente. Detalhes: {raw_tips[0] if raw_tips else 'N/A'}"
-
-
-    print("Sintetizando dicas com Gemini...")
-    # st.info("Sintetizando as dicas para um relatório final...")
-    final_report = synthesize_tips_with_gemini(raw_tips, game_name)
-
-    if not final_report or final_report.startswith("Erro"):
-        print(f"❌ Erro na síntese com Gemini: {final_report}")
-        return f"❌ Erro na síntese com Gemini. Por favor, tente novamente. Detalhes: {final_report}"
-
-    # Limpeza de arquivos temporários (opcional, pode ser ajustado)
-    if os.path.exists(compressed_file):
-        os.remove(compressed_file)
-    if os.path.exists(ml_data_file):
-        os.remove(ml_data_file)
-
-    return final_report
-
-# Este bloco só será executado se gameplay_analyzer.py for executado diretamente,
-# não quando importado pelo fds.py.
-if __name__ == "__main__":
-    # Exemplo de como você chamaria se fosse testar diretamente:
-    # (Comente ou remova as linhas abaixo quando integrar ao Streamlit)
-    print("Este script é destinado a ser importado pelo seu aplicativo Streamlit.")
-    print("Para testá-lo, você precisaria fornecer um jogo_alvo_exe e um gameplay_prompt.")
-    # Exemplo:
-    # test_game_exe = "valorant.exe"
-    # test_game_name = "Valorant"
-    # test_prompt = "Você é um especialista em Valorant. Analise este frame de gameplay..."
-    # report = run_gameplay_analysis(test_game_exe, test_prompt, test_game_name, duration_seconds=10)
-    # print("\n--- Relatório de Teste ---")
-    # print(report)
+        st.error(f"Ocorreu um erro durante a análise de gameplay: {e}")
+        return f"Erro fatal durante a análise: {e}"
+    finally:
+        # Fechar o sct e liberar recursos
+        sct.close()

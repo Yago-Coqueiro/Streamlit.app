@@ -199,7 +199,7 @@ def main():
 def show_auth_screen():
     st.title("CONHEÇA O ME ENSINA A.I")
     st.write("""
-    Em meio ao crescimento acelerado do universo gamer, um site brasileiro vem se destacando ao unir inteligência artificial e paixão por jogos. A plataforma foi criada com um propósito claro: ajudar jogadores de todos os níveis a melhorarem suas habilidades por meio de análises inteligentes e treinos personalizados com apoio de IA.
+    Em meio ao crescimento acelerado do universo gamer a nível mundial, um site brasileiro vem se destacando ao unir inteligência artificial e paixão por jogos. A plataforma foi criada com um propósito claro: ajudar jogadores de todos os níveis a melhorarem suas habilidades por meio de análises inteligentes e treinos personalizados com apoio de IA.
     Com ferramentas que analisam o desempenho em tempo real, o site oferece feedbacks estratégicos, dicas de posicionamento, tempo de reação, mira e tomada de decisão. Tudo isso baseado em dados precisos, o que torna o treinamento muito mais eficiente do que os métodos tradicionais.
     Essa inovação não só eleva o nível dos jogadores casuais, mas também abre portas para que mais talentos brasileiros cheguem ao cenário competitivo. O resultado é uma nova geração de gamers cada vez mais preparada e profissionalizada, contribuindo diretamente para o crescimento do público e da relevância dos eSports no Brasil.
     Combinando tecnologia de ponta com acessibilidade, essa plataforma está transformando o jeito de jogar — e o futuro dos jogos no país.
